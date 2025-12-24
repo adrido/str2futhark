@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  create_release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: ${{ github.ref_name }}
+          body: "Release ${{ github.ref_name }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build_and_upload:
+    needs: create_release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release
+        run: cargo build --release
+
+      
+      - name: Prepare zip & checksum (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          BIN=target/release/str2futhark
+          ZIP=str2futhark-${{ matrix.os == 'macos-latest' && 'macos' || 'linux' }}.zip
+          echo "BIN=$BIN" >> $GITHUB_ENV
+          echo "ZIP=$ZIP" >> $GITHUB_ENV
+          zip -j "$ZIP" "$BIN"
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            shasum -a 256 "$ZIP" > "$ZIP.sha256"
+          else
+            sha256sum "$ZIP" > "$ZIP.sha256"
+          fi
+
+      - name: Prepare zip & checksum (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $bin = 'target\\release\\str2futhark.exe'
+          $zip = 'str2futhark-windows.zip'
+          echo "BIN=$bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding ASCII -Append
+          echo "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding ASCII -Append
+          Compress-Archive -Path $bin -DestinationPath $zip -Force
+          $hash = Get-FileHash -Algorithm SHA256 $zip
+          "$($hash.Hash)  $zip" | Out-File -FilePath "$zip.sha256" -Encoding ASCII
+
+      - name: Upload zip asset
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ${{ env.ZIP }}
+          asset_name: ${{ env.ZIP }}
+          asset_content_type: application/zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload checksum asset
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ${{ env.ZIP }}.sha256
+          asset_name: ${{ env.ZIP }}.sha256
+          asset_content_type: text/plain
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
