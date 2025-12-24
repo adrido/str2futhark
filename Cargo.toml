@@ -1,0 +1,15 @@
+[package]
+name = "str2futhark"
+version = "0.1.0"
+edition = "2024"
+description = "Transliterate text into Elder Futhark runes"
+readme = "README.md"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "2.1"
+tempfile = "3.6"
